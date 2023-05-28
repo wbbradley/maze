@@ -1,6 +1,6 @@
+use crate::seg::intersection;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::f64::consts::TAU;
 use std::time::{Duration, Instant};
@@ -9,15 +9,20 @@ use svg::node::element::{Circle, Path};
 use svg::Document;
 use vector2d::Vector2D;
 
+mod seg;
+
 type V2 = Vector2D<f64>;
 type Result<T> = std::result::Result<T, Error>;
 const MAZE_RADIUS: f64 = 500.0;
-const MIN_SPACING: f64 = 2.0 / 50.0 * MAZE_RADIUS;
-const TUBE_RADIUS: f64 = 0.01 * MAZE_RADIUS;
+const MIN_SPACING: f64 = 1.0 / 50.0 * MAZE_RADIUS;
+const TUBE_RADIUS: f64 = 0.0045 * MAZE_RADIUS;
 const COMPUTE_TIME: Duration = Duration::from_secs(3);
 
 #[derive(Debug)]
 pub struct Error(String);
+
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub struct Edge(pub Index, pub Index);
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
@@ -25,28 +30,7 @@ impl From<std::io::Error> for Error {
     }
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-enum Index {
-    Start,
-    Index(usize),
-    End,
-}
-impl std::cmp::PartialOrd for Index {
-    fn partial_cmp(&self, other: &Index) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl std::cmp::Ord for Index {
-    fn cmp(&self, rhs: &Self) -> Ordering {
-        match (self, rhs) {
-            (&Index::Start, _) => Ordering::Less,
-            (&Index::End, _) => Ordering::Greater,
-            (_, &Index::Start) => Ordering::Greater,
-            (_, &Index::End) => Ordering::Less,
-            (&Index::Index(a), Index::Index(b)) => a.cmp(b),
-        }
-    }
-}
+type Index = usize;
 
 #[derive(Debug, Copy, Clone)]
 struct Node {
@@ -57,9 +41,27 @@ struct Node {
 fn main() -> Result<()> {
     let mut rng = rand::thread_rng();
     let mut nodes: Vec<Node> = Vec::new();
-    let start = Instant::now();
+    let start: Node = Node {
+        index: 0,
+        point: Pol {
+            a: -TAU / 2.0,
+            r: MAZE_RADIUS + TUBE_RADIUS * 10.0,
+        }
+        .into(),
+    };
+    nodes.push(start);
+    let end: Node = Node {
+        index: 1,
+        point: Pol {
+            a: 0.0,
+            r: MAZE_RADIUS + TUBE_RADIUS * 10.0,
+        }
+        .into(),
+    };
+    nodes.push(end);
+    let start_compute = Instant::now();
     let mut tries = 0;
-    while Instant::now() - start < COMPUTE_TIME {
+    while Instant::now() - start_compute < COMPUTE_TIME {
         let radians: f64 = rng.gen::<f64>() * TAU;
         let radius: f64 = rng.gen::<f64>() * (MAZE_RADIUS - TUBE_RADIUS * (2f64).sqrt() * 2.0);
         let point = V2 {
@@ -74,7 +76,7 @@ fn main() -> Result<()> {
         {
             nodes.push(Node {
                 point,
-                index: Index::Index(nodes.len()),
+                index: nodes.len(),
             });
         }
     }
@@ -88,35 +90,20 @@ fn main() -> Result<()> {
             2.0 * MAZE_RADIUS,
         ),
     );
-    let start: Node = Node {
-        index: Index::Start,
-        point: Pol {
-            a: -TAU / 2.0,
-            r: MAZE_RADIUS + TUBE_RADIUS * 10.0,
-        }
-        .into(),
-    };
-    let end: Node = Node {
-        index: Index::End,
-        point: Pol {
-            a: 0.0,
-            r: MAZE_RADIUS + TUBE_RADIUS * 10.0,
-        }
-        .into(),
-    };
 
     let mut visited: HashSet<Index> = Default::default();
-    let mut edges: HashSet<(Index, Index)> = Default::default();
-    let start_point: Node = get_nearest_k(&nodes, start, 1)[0];
-    let end_point: Node = get_nearest_k(&nodes, end, 1)[0];
+    let mut edges: HashSet<Edge> = Default::default();
+    let start_point: Node = get_nearest_k(&nodes, start, 2)[0];
+    let end_point: Node = get_nearest_k(&nodes, end, 2)[1];
     dfs(&mut rng, start, &mut edges, &mut visited, &nodes);
     document = document.add(
         Circle::new()
             .set("r", MAZE_RADIUS)
             .set("cx", 0.0)
             .set("cy", 0.0)
-            .set("fill", "black"),
+            .set("fill", "blue"),
     );
+    /*
     for Node {
         point: V2 { x, y }, ..
     } in nodes.iter()
@@ -129,9 +116,27 @@ fn main() -> Result<()> {
                 .set("fill", "white"),
         );
     }
-    for (a, b) in edges {
-        if let (Index::Index(a), Index::Index(b)) = (a, b) {
-            document = add_edge(document, nodes[a].point, nodes[b].point, "white");
+    */
+    let drawn_nodes: HashSet<Index> = HashSet::new();
+    for Edge(a, b) in edges {
+        document = add_edge(document, nodes[a].point, nodes[b].point, "white");
+        if !drawn_nodes.contains(&a) {
+            document = document.add(
+                Circle::new()
+                    .set("r", TUBE_RADIUS)
+                    .set("cx", nodes[a].point.x)
+                    .set("cy", nodes[a].point.y)
+                    .set("fill", "white"),
+            );
+        }
+        if !drawn_nodes.contains(&b) {
+            document = document.add(
+                Circle::new()
+                    .set("r", TUBE_RADIUS)
+                    .set("cx", nodes[b].point.x)
+                    .set("cy", nodes[b].point.y)
+                    .set("fill", "white"),
+            );
         }
     }
     document = add_edge(document, start.point, start_point.point, "white");
@@ -154,7 +159,7 @@ fn get_nearest_k(nodes: &[Node], cur: Node, k: usize) -> Vec<Node> {
 fn dfs(
     rng: &mut impl Rng,
     current: Node,
-    edges: &mut HashSet<(Index, Index)>,
+    edges: &mut HashSet<Edge>,
     visited: &mut HashSet<Index>,
     nodes: &Vec<Node>,
 ) {
@@ -169,10 +174,28 @@ fn dfs(
             } else {
                 (&node, &current)
             };
-            edges.insert((a.index, b.index));
+            let edge = Edge(a.index, b.index);
+            if edge_intersects(edge, edges, nodes) {
+                continue;
+            }
+            edges.insert(edge);
             dfs(rng, node, edges, visited, nodes);
         }
     }
+}
+fn edge_intersects(edge: Edge, edges: &HashSet<Edge>, nodes: &[Node]) -> bool {
+    let Edge(a, b) = edge;
+    for &Edge(c, d) in edges {
+        if intersection(
+            nodes[a].point,
+            nodes[b].point,
+            nodes[c].point,
+            nodes[d].point,
+        ) {
+            return true;
+        }
+    }
+    false
 }
 fn add_edge(document: Document, start: V2, end: V2, color: &str) -> Document {
     eprintln!("[add_edge] start={start:?} end={end:?}");
