@@ -1,4 +1,4 @@
-use crate::knn::PointCloud;
+use rand::seq::SliceRandom;
 use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -8,9 +8,6 @@ use svg::node::element::path::Data;
 use svg::node::element::{Circle, Path};
 use svg::Document;
 use vector2d::Vector2D;
-
-mod heap;
-mod knn;
 
 type V2 = Vector2D<f64>;
 type Result<T> = std::result::Result<T, Error>;
@@ -22,23 +19,23 @@ const COMPUTE_TIME: Duration = Duration::from_secs(3);
 #[derive(Debug)]
 pub struct Error(String);
 
-fn dist(a: &Node, b: &Node) -> f64 {
-    (a.point - b.point).length_squared()
-}
-
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
         Self(e.to_string())
     }
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 enum Index {
     Start,
     Index(usize),
     End,
 }
-
+impl std::cmp::PartialOrd for Index {
+    fn partial_cmp(&self, other: &Index) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 impl std::cmp::Ord for Index {
     fn cmp(&self, rhs: &Self) -> Ordering {
         match (self, rhs) {
@@ -108,17 +105,11 @@ fn main() -> Result<()> {
         .into(),
     };
 
-    let mut _visited: HashSet<Index> = Default::default();
-    let mut _edges: HashSet<(Index, Index)> = Default::default();
-    let mut cloud = PointCloud::new(dist);
-    nodes.iter().for_each(|node| cloud.add_point(node));
-    let Some(&(_, &start_point)) = cloud.get_nearest_k(&start, 1).first() else {
-        panic!("no start point!?");
-    };
-    let Some(&(_, &end_point)) = cloud.get_nearest_k(&end, 1).first() else {
-        panic!("no start point!?");
-    };
-    // dfs(&mut edges, &mut visited)
+    let mut visited: HashSet<Index> = Default::default();
+    let mut edges: HashSet<(Index, Index)> = Default::default();
+    let start_point: Node = get_nearest_k(&nodes, start, 1)[0];
+    let end_point: Node = get_nearest_k(&nodes, end, 1)[0];
+    dfs(&mut rng, start, &mut edges, &mut visited, &nodes);
     document = document.add(
         Circle::new()
             .set("r", MAZE_RADIUS)
@@ -128,22 +119,61 @@ fn main() -> Result<()> {
     );
     for Node {
         point: V2 { x, y }, ..
-    } in nodes
+    } in nodes.iter()
     {
         document = document.add(
             Circle::new()
                 .set("r", TUBE_RADIUS)
-                .set("cx", x)
-                .set("cy", y)
+                .set("cx", *x)
+                .set("cy", *y)
                 .set("fill", "white"),
         );
     }
-    document = add_edge(document, start.point, start_point.point, "green");
-    document = add_edge(document, end.point, end_point.point, "red");
+    for (a, b) in edges {
+        if let (Index::Index(a), Index::Index(b)) = (a, b) {
+            document = add_edge(document, nodes[a].point, nodes[b].point, "white");
+        }
+    }
+    document = add_edge(document, start.point, start_point.point, "white");
+    document = add_edge(document, end.point, end_point.point, "white");
     svg::save("image.svg", &document)?;
     Ok(())
 }
 
+fn get_nearest_k(nodes: &[Node], cur: Node, k: usize) -> Vec<Node> {
+    let mut nodes: Vec<Node> = nodes.to_vec();
+    nodes.sort_by(|a, b| {
+        let a_dist: f64 = (a.point - cur.point).length_squared();
+        let b_dist: f64 = (b.point - cur.point).length_squared();
+        a_dist.partial_cmp(&b_dist).unwrap()
+    });
+    nodes.truncate(k);
+    nodes
+}
+
+fn dfs(
+    rng: &mut impl Rng,
+    current: Node,
+    edges: &mut HashSet<(Index, Index)>,
+    visited: &mut HashSet<Index>,
+    nodes: &Vec<Node>,
+) {
+    //
+    let mut nearest_nodes = get_nearest_k(nodes, current, 8);
+    nearest_nodes.shuffle(rng);
+    for node in nearest_nodes {
+        if !visited.contains(&node.index) {
+            visited.insert(node.index);
+            let (a, b): (&Node, &Node) = if current.index < node.index {
+                (&current, &node)
+            } else {
+                (&node, &current)
+            };
+            edges.insert((a.index, b.index));
+            dfs(rng, node, edges, visited, nodes);
+        }
+    }
+}
 fn add_edge(document: Document, start: V2, end: V2, color: &str) -> Document {
     eprintln!("[add_edge] start={start:?} end={end:?}");
     let data = Data::new()
