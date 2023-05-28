@@ -1,5 +1,6 @@
 use crate::knn::PointCloud;
 use rand::Rng;
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::f64::consts::TAU;
 use std::time::{Duration, Instant};
@@ -21,18 +22,44 @@ const COMPUTE_TIME: Duration = Duration::from_secs(3);
 #[derive(Debug)]
 pub struct Error(String);
 
-fn dist(a: &V2, b: &V2) -> f64 {
-    (a - b).length_squared()
+fn dist(a: &Node, b: &Node) -> f64 {
+    (a.point - b.point).length_squared()
 }
+
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
         Self(e.to_string())
     }
 }
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, PartialOrd)]
+enum Index {
+    Start,
+    Index(usize),
+    End,
+}
+
+impl std::cmp::Ord for Index {
+    fn cmp(&self, rhs: &Self) -> Ordering {
+        match (self, rhs) {
+            (&Index::Start, _) => Ordering::Less,
+            (&Index::End, _) => Ordering::Greater,
+            (_, &Index::Start) => Ordering::Greater,
+            (_, &Index::End) => Ordering::Less,
+            (&Index::Index(a), Index::Index(b)) => a.cmp(b),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Node {
+    point: V2,
+    index: Index,
+}
+
 fn main() -> Result<()> {
     let mut rng = rand::thread_rng();
-    let mut points: Vec<V2> = Vec::new();
+    let mut nodes: Vec<Node> = Vec::new();
     let start = Instant::now();
     let mut tries = 0;
     while Instant::now() - start < COMPUTE_TIME {
@@ -43,12 +70,15 @@ fn main() -> Result<()> {
             y: radians.sin() * radius,
         };
         tries += 1;
-        if points
+        if nodes
             .iter()
             .cloned()
-            .all(|a| (a - point).length() > MIN_SPACING)
+            .all(|Node { point: a, .. }| (a - point).length() > MIN_SPACING)
         {
-            points.push(point);
+            nodes.push(Node {
+                point,
+                index: Index::Index(nodes.len()),
+            });
         }
     }
     eprintln!("scanned {} points.", tries);
@@ -61,27 +91,34 @@ fn main() -> Result<()> {
             2.0 * MAZE_RADIUS,
         ),
     );
-    let start: V2 = Pol {
-        a: -TAU / 3.0,
-        r: MAZE_RADIUS + TUBE_RADIUS * 10.0,
-    }
-    .into();
-    let end: V2 = Pol {
-        a: -2.0 * TAU / 3.0,
-        r: MAZE_RADIUS + TUBE_RADIUS * 10.0,
-    }
-    .into();
+    let start: Node = Node {
+        index: Index::Start,
+        point: Pol {
+            a: -TAU / 2.0,
+            r: MAZE_RADIUS + TUBE_RADIUS * 10.0,
+        }
+        .into(),
+    };
+    let end: Node = Node {
+        index: Index::End,
+        point: Pol {
+            a: 0.0,
+            r: MAZE_RADIUS + TUBE_RADIUS * 10.0,
+        }
+        .into(),
+    };
 
-    let edges: HashSet<(usize, usize)> = Default::default();
+    let mut _visited: HashSet<Index> = Default::default();
+    let mut _edges: HashSet<(Index, Index)> = Default::default();
     let mut cloud = PointCloud::new(dist);
-    points.iter().for_each(|p| cloud.add_point(p));
+    nodes.iter().for_each(|node| cloud.add_point(node));
     let Some(&(_, &start_point)) = cloud.get_nearest_k(&start, 1).first() else {
         panic!("no start point!?");
     };
     let Some(&(_, &end_point)) = cloud.get_nearest_k(&end, 1).first() else {
         panic!("no start point!?");
     };
-
+    // dfs(&mut edges, &mut visited)
     document = document.add(
         Circle::new()
             .set("r", MAZE_RADIUS)
@@ -89,7 +126,10 @@ fn main() -> Result<()> {
             .set("cy", 0.0)
             .set("fill", "black"),
     );
-    for V2 { x, y } in points {
+    for Node {
+        point: V2 { x, y }, ..
+    } in nodes
+    {
         document = document.add(
             Circle::new()
                 .set("r", TUBE_RADIUS)
@@ -98,20 +138,20 @@ fn main() -> Result<()> {
                 .set("fill", "white"),
         );
     }
-    document = add_edge(document, start, start_point);
-    document = add_edge(document, end, end_point);
+    document = add_edge(document, start.point, start_point.point, "green");
+    document = add_edge(document, end.point, end_point.point, "red");
     svg::save("image.svg", &document)?;
     Ok(())
 }
 
-fn add_edge(document: Document, start: V2, end: V2) -> Document {
+fn add_edge(document: Document, start: V2, end: V2, color: &str) -> Document {
     eprintln!("[add_edge] start={start:?} end={end:?}");
     let data = Data::new()
         .move_to((start.x, start.y))
         .line_to((end.x, end.y));
     let path = Path::new()
-        .set("fill", "red")
-        .set("stroke", "#ff000077")
+        .set("fill", color)
+        .set("stroke", color)
         .set("stroke-width", TUBE_RADIUS * 2.0)
         .set("d", data);
     document.add(path)
