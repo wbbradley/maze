@@ -78,6 +78,9 @@ fn main() -> Result<()> {
     let Some(&(_, &start_point)) = cloud.get_nearest_k(&start, 1).first() else {
         panic!("no start point!?");
     };
+    let Some(&(_, &end_point)) = cloud.get_nearest_k(&end, 1).first() else {
+        panic!("no start point!?");
+    };
 
     document = document.add(
         Circle::new()
@@ -96,6 +99,7 @@ fn main() -> Result<()> {
         );
     }
     document = add_edge(document, start, start_point);
+    document = add_edge(document, end, end_point);
     svg::save("image.svg", &document)?;
     Ok(())
 }
