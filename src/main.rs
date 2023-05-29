@@ -16,7 +16,7 @@ mod seg;
 type V2 = Vector2D<f64>;
 type Result<T> = std::result::Result<T, Error>;
 const MAZE_RADIUS: f64 = 500.0;
-const TUBE_RADIUS: f64 = 0.015 * MAZE_RADIUS;
+const TUBE_RADIUS: f64 = 0.005 * MAZE_RADIUS;
 const MIN_SPACING: f64 = TUBE_RADIUS * 3.5;
 const TUBE_SHRINK: f64 = 0.15;
 const COMPUTE_TIME: Duration = Duration::from_secs(2);
@@ -94,7 +94,7 @@ fn main() -> Result<()> {
                 2.0 * MAZE_RADIUS,
             ),
         )
-        .set("background-color", "black");
+        .set("style", "background-color: black");
 
     let mut visited: HashSet<Index> = Default::default();
     let mut edges: HashSet<Edge> = Default::default();
@@ -305,7 +305,9 @@ fn bfs(
             if diff > PI * 0.6 {
                 continue;
             }
-            //if edge_intersects(edge, edges, nodes) { continue; }
+            if edge_intersects(edge, edges, nodes) {
+                continue;
+            }
             let midpoint = (node.point + current.point) * 0.5;
             if midpoints
                 .iter()
