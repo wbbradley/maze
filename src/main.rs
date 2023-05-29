@@ -1,7 +1,9 @@
 use crate::seg::*;
 use hex_color::HexColor;
+use rand::seq::SliceRandom;
 use rand::Rng;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::f64::consts::{PI, TAU};
 use std::time::{Duration, Instant};
 use svg::node::element::path::Data;
@@ -82,23 +84,24 @@ fn main() -> Result<()> {
         }
     }
     eprintln!("scanned {} points, found {} points.", tries, nodes.len());
-    let mut document = Document::new().set(
-        "viewBox",
-        (
-            -MAZE_RADIUS,
-            -MAZE_RADIUS,
-            2.0 * MAZE_RADIUS,
-            2.0 * MAZE_RADIUS,
-        ),
-    );
+    let mut document = Document::new()
+        .set(
+            "viewBox",
+            (
+                -MAZE_RADIUS,
+                -MAZE_RADIUS,
+                2.0 * MAZE_RADIUS,
+                2.0 * MAZE_RADIUS,
+            ),
+        )
+        .set("background-color", "black");
 
     let mut visited: HashSet<Index> = Default::default();
     let mut edges: HashSet<Edge> = Default::default();
     let start_point: Node = get_nearest_k(&nodes, start, 2)[0];
-    let end_point: Node = get_nearest_k(&nodes, end, 2)[1];
     let mut midpoints: Vec<V2> = Vec::new();
     let mut max_depth_index = (0, 0);
-    dfs(
+    bfs(
         &mut rng,
         start_point.point - V2 { x: 10.0, y: 0.0 },
         start_point,
@@ -107,7 +110,6 @@ fn main() -> Result<()> {
         &nodes,
         &mut midpoints,
         &mut max_depth_index,
-        1,
     );
     eprintln!("created {} edges", edges.len());
     document = document.add(
@@ -241,6 +243,84 @@ fn dfs(
                     max_depth_index,
                     depth + 1,
                 );
+            }
+        }
+    }
+}
+#[derive(Debug, Copy, Clone)]
+struct QueueItem {
+    prior: V2,
+    current: Node,
+    next: Node,
+    depth: usize,
+}
+fn enqueue_nearest(
+    rng: &mut impl Rng,
+    prior: V2,
+    nodes: &[Node],
+    current: Node,
+    k: usize,
+    depth: usize,
+    queue: &mut VecDeque<QueueItem>,
+) {
+    if depth > 15 {
+        return;
+    }
+    let mut nearest_nodes = get_nearest_k(nodes, current, k);
+    nearest_nodes.shuffle(rng);
+    for node in nearest_nodes {
+        queue.push_back(QueueItem {
+            prior,
+            current,
+            next: node,
+            depth,
+        });
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn bfs(
+    rng: &mut impl Rng,
+    prior: V2,
+    current: Node,
+    edges: &mut HashSet<Edge>,
+    visited: &mut HashSet<Index>,
+    nodes: &[Node],
+    midpoints: &mut Vec<V2>,
+    max_depth_index: &mut (usize, usize),
+) {
+    let mut queue: VecDeque<QueueItem> = Default::default();
+    enqueue_nearest(rng, prior, nodes, current, 12, 1, &mut queue);
+    while let Some(QueueItem {
+        prior,
+        current,
+        next: node,
+        depth,
+    }) = queue.pop_front()
+    {
+        let cur_vec_angle = (current.point - prior).normalise().angle();
+        if !visited.contains(&node.index) {
+            let edge = Edge(current.index, node.index);
+            let edge_vec = (node.point - current.point).normalise();
+            let diff = radian_diff(edge_vec.angle(), cur_vec_angle);
+            if diff > PI * 0.6 {
+                continue;
+            }
+            //if edge_intersects(edge, edges, nodes) { continue; }
+            let midpoint = (node.point + current.point) * 0.5;
+            if midpoints
+                .iter()
+                .all(|&m| (m - midpoint).length() > MIN_SPACING * 0.8)
+                && nodes
+                    .iter()
+                    .all(|n| (n.point - midpoint).length() > TUBE_RADIUS * 2.1)
+            {
+                if depth > max_depth_index.0 {
+                    *max_depth_index = (depth, node.index);
+                }
+                midpoints.push(midpoint);
+                visited.insert(node.index);
+                edges.insert(edge);
+                enqueue_nearest(rng, current.point, nodes, node, 12, depth + 1, &mut queue);
             }
         }
     }
