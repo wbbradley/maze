@@ -41,27 +41,8 @@ struct Node {
     index: Index,
 }
 
-fn main() -> Result<()> {
-    let mut rng = rand::thread_rng();
+fn gen_nodes_random(rng: &mut impl Rng) -> Vec<Node> {
     let mut nodes: Vec<Node> = Vec::new();
-    let start: Node = Node {
-        index: 0,
-        point: Pol {
-            a: -TAU / 2.0,
-            r: MAZE_RADIUS + TUBE_RADIUS * 10.0,
-        }
-        .into(),
-    };
-    // nodes.push(start);
-    let end: Node = Node {
-        index: 1,
-        point: Pol {
-            a: 0.0,
-            r: MAZE_RADIUS + TUBE_RADIUS * 10.0,
-        }
-        .into(),
-    };
-    // nodes.push(end);
     let start_compute = Instant::now();
     let mut tries = 0;
     while Instant::now() - start_compute < COMPUTE_TIME {
@@ -84,6 +65,20 @@ fn main() -> Result<()> {
         }
     }
     eprintln!("scanned {} points, found {} points.", tries, nodes.len());
+    nodes
+}
+
+fn main() -> Result<()> {
+    let mut rng = rand::thread_rng();
+    let start: Node = Node {
+        index: 0,
+        point: Pol {
+            a: -PI,
+            r: MAZE_RADIUS + TUBE_RADIUS * 10.0,
+        }
+        .into(),
+    };
+    let nodes: Vec<Node> = gen_nodes_random(&mut rng);
     let mut document = Document::new()
         .set(
             "viewBox",
@@ -261,21 +256,20 @@ fn enqueue_nearest(
     current: Node,
     k: usize,
     depth: usize,
-    queue: &mut VecDeque<QueueItem>,
+    queue: &mut Vec<QueueItem>,
 ) {
-    if depth > 15 {
-        return;
-    }
+    // if depth > 15 { return; }
     let mut nearest_nodes = get_nearest_k(nodes, current, k);
     nearest_nodes.shuffle(rng);
     for node in nearest_nodes {
-        queue.push_back(QueueItem {
+        queue.push(QueueItem {
             prior,
             current,
             next: node,
             depth,
         });
     }
+    queue.shuffle(rng);
 }
 #[allow(clippy::too_many_arguments)]
 fn bfs(
@@ -288,15 +282,16 @@ fn bfs(
     midpoints: &mut Vec<V2>,
     max_depth_index: &mut (usize, usize),
 ) {
-    let mut queue: VecDeque<QueueItem> = Default::default();
+    let mut queue: Vec<QueueItem> = Default::default();
     enqueue_nearest(rng, prior, nodes, current, 12, 1, &mut queue);
-    while let Some(QueueItem {
+    while let Some(&QueueItem {
         prior,
         current,
         next: node,
         depth,
-    }) = queue.pop_front()
+    }) = queue.get(0)
     {
+        queue.remove(0);
         let cur_vec_angle = (current.point - prior).normalise().angle();
         if !visited.contains(&node.index) {
             let edge = Edge(current.index, node.index);
