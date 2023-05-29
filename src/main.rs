@@ -1,8 +1,8 @@
-use crate::seg::intersection;
-use rand::seq::SliceRandom;
+use crate::seg::*;
+use hex_color::HexColor;
 use rand::Rng;
 use std::collections::HashSet;
-use std::f64::consts::TAU;
+use std::f64::consts::{PI, TAU};
 use std::time::{Duration, Instant};
 use svg::node::element::path::Data;
 use svg::node::element::{Circle, Path};
@@ -14,9 +14,10 @@ mod seg;
 type V2 = Vector2D<f64>;
 type Result<T> = std::result::Result<T, Error>;
 const MAZE_RADIUS: f64 = 500.0;
-const MIN_SPACING: f64 = 1.0 / 50.0 * MAZE_RADIUS;
-const TUBE_RADIUS: f64 = 0.0045 * MAZE_RADIUS;
-const COMPUTE_TIME: Duration = Duration::from_secs(3);
+const TUBE_RADIUS: f64 = 0.005 * MAZE_RADIUS;
+const MIN_SPACING: f64 = TUBE_RADIUS * 3.5;
+const TUBE_SHRINK: f64 = 0.15;
+const COMPUTE_TIME: Duration = Duration::from_secs(2);
 
 #[derive(Debug)]
 pub struct Error(String);
@@ -80,7 +81,7 @@ fn main() -> Result<()> {
             });
         }
     }
-    eprintln!("scanned {} points.", tries);
+    eprintln!("scanned {} points, found {} points.", tries, nodes.len());
     let mut document = Document::new().set(
         "viewBox",
         (
@@ -95,7 +96,15 @@ fn main() -> Result<()> {
     let mut edges: HashSet<Edge> = Default::default();
     let start_point: Node = get_nearest_k(&nodes, start, 2)[0];
     let end_point: Node = get_nearest_k(&nodes, end, 2)[1];
-    dfs(&mut rng, start, &mut edges, &mut visited, &nodes);
+    dfs(
+        &mut rng,
+        start.point - V2 { x: 10.0, y: 0.0 },
+        start,
+        &mut edges,
+        &mut visited,
+        &nodes,
+    );
+    eprintln!("created {} edges", edges.len());
     document = document.add(
         Circle::new()
             .set("r", MAZE_RADIUS)
@@ -103,7 +112,6 @@ fn main() -> Result<()> {
             .set("cy", 0.0)
             .set("fill", "blue"),
     );
-    /*
     for Node {
         point: V2 { x, y }, ..
     } in nodes.iter()
@@ -113,13 +121,14 @@ fn main() -> Result<()> {
                 .set("r", TUBE_RADIUS)
                 .set("cx", *x)
                 .set("cy", *y)
-                .set("fill", "white"),
+                .set("fill", HexColor::random_rgba().to_string().as_str()), // "white"),
         );
     }
-    */
     let drawn_nodes: HashSet<Index> = HashSet::new();
+
     for Edge(a, b) in edges {
-        document = add_edge(document, nodes[a].point, nodes[b].point, "white");
+        let color = HexColor::random_rgb().to_string();
+        document = add_edge(document, nodes[a].point, nodes[b].point, color.as_ref()); // "white");
         if !drawn_nodes.contains(&a) {
             document = document.add(
                 Circle::new()
@@ -158,39 +167,50 @@ fn get_nearest_k(nodes: &[Node], cur: Node, k: usize) -> Vec<Node> {
 
 fn dfs(
     rng: &mut impl Rng,
+    prior: V2,
     current: Node,
     edges: &mut HashSet<Edge>,
     visited: &mut HashSet<Index>,
     nodes: &Vec<Node>,
 ) {
-    //
+    let cur_vec_angle = (current.point - prior).normalise().angle();
     let mut nearest_nodes = get_nearest_k(nodes, current, 8);
-    nearest_nodes.shuffle(rng);
+    // nearest_nodes.shuffle(rng);
     for node in nearest_nodes {
         if !visited.contains(&node.index) {
             visited.insert(node.index);
-            let (a, b): (&Node, &Node) = if current.index < node.index {
-                (&current, &node)
-            } else {
-                (&node, &current)
-            };
-            let edge = Edge(a.index, b.index);
+            let edge = Edge(current.index, node.index);
+            let edge_vec = (node.point - current.point).normalise();
+            let diff = radian_diff(edge_vec.angle(), cur_vec_angle);
+            // if diff < PI * 0.4 { continue; }
             if edge_intersects(edge, edges, nodes) {
                 continue;
             }
+
             edges.insert(edge);
-            dfs(rng, node, edges, visited, nodes);
+            dfs(rng, current.point, node, edges, visited, nodes);
         }
     }
+}
+fn radian_diff(a: f64, b: f64) -> f64 {
+    let mut d = a - b;
+    if d > PI {
+        d -= TAU;
+    } else if d < -PI {
+        d += TAU;
+    }
+    d.abs()
 }
 fn edge_intersects(edge: Edge, edges: &HashSet<Edge>, nodes: &[Node]) -> bool {
     let Edge(a, b) = edge;
     for &Edge(c, d) in edges {
-        if intersection(
+        if intersection_with_width(
             nodes[a].point,
             nodes[b].point,
             nodes[c].point,
             nodes[d].point,
+            TUBE_RADIUS,
+            TUBE_SHRINK,
         ) {
             return true;
         }
@@ -198,7 +218,7 @@ fn edge_intersects(edge: Edge, edges: &HashSet<Edge>, nodes: &[Node]) -> bool {
     false
 }
 fn add_edge(document: Document, start: V2, end: V2, color: &str) -> Document {
-    eprintln!("[add_edge] start={start:?} end={end:?}");
+    // eprintln!("[add_edge] start={start:?} end={end:?}");
     let data = Data::new()
         .move_to((start.x, start.y))
         .line_to((end.x, end.y));
