@@ -183,9 +183,7 @@ fn dfs(
             let edge_vec = (node.point - current.point).normalise();
             let diff = radian_diff(edge_vec.angle(), cur_vec_angle);
             // if diff < PI * 0.4 { continue; }
-            if edge_intersects(edge, edges, nodes) {
-                continue;
-            }
+            // if edge_intersects(edge, edges, nodes) { continue; }
 
             edges.insert(edge);
             dfs(rng, current.point, node, edges, visited, nodes);
