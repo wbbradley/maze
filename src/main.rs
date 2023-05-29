@@ -110,25 +110,14 @@ fn main() -> Result<()> {
             .set("r", MAZE_RADIUS)
             .set("cx", 0.0)
             .set("cy", 0.0)
-            .set("fill", "blue"),
+            .set("fill", "grey"),
     );
-    for Node {
-        point: V2 { x, y }, ..
-    } in nodes.iter()
-    {
-        document = document.add(
-            Circle::new()
-                .set("r", TUBE_RADIUS)
-                .set("cx", *x)
-                .set("cy", *y)
-                .set("fill", HexColor::random_rgba().to_string().as_str()), // "white"),
-        );
-    }
+
     let drawn_nodes: HashSet<Index> = HashSet::new();
 
     for Edge(a, b) in edges {
-        let color = HexColor::random_rgb().to_string();
-        document = add_edge(document, nodes[a].point, nodes[b].point, color.as_ref()); // "white");
+        let color = "white"; // HexColor::random_rgb().to_string();
+        document = add_edge(document, nodes[a].point, nodes[b].point, color);
         if !drawn_nodes.contains(&a) {
             document = document.add(
                 Circle::new()
@@ -150,6 +139,18 @@ fn main() -> Result<()> {
     }
     document = add_edge(document, start.point, start_point.point, "white");
     document = add_edge(document, end.point, end_point.point, "white");
+    for Node {
+        point: V2 { x, y }, ..
+    } in nodes.iter()
+    {
+        document = document.add(
+            Circle::new()
+                .set("r", TUBE_RADIUS)
+                .set("cx", *x)
+                .set("cy", *y)
+                .set("fill", HexColor::random_rgba().to_string().as_str()), // "white"),
+        );
+    }
     svg::save("image.svg", &document)?;
     Ok(())
 }
