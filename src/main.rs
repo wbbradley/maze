@@ -14,7 +14,7 @@ mod seg;
 type V2 = Vector2D<f64>;
 type Result<T> = std::result::Result<T, Error>;
 const MAZE_RADIUS: f64 = 500.0;
-const TUBE_RADIUS: f64 = 0.005 * MAZE_RADIUS;
+const TUBE_RADIUS: f64 = 0.015 * MAZE_RADIUS;
 const MIN_SPACING: f64 = TUBE_RADIUS * 3.5;
 const TUBE_SHRINK: f64 = 0.15;
 const COMPUTE_TIME: Duration = Duration::from_secs(2);
@@ -50,7 +50,7 @@ fn main() -> Result<()> {
         }
         .into(),
     };
-    nodes.push(start);
+    // nodes.push(start);
     let end: Node = Node {
         index: 1,
         point: Pol {
@@ -59,7 +59,7 @@ fn main() -> Result<()> {
         }
         .into(),
     };
-    nodes.push(end);
+    // nodes.push(end);
     let start_compute = Instant::now();
     let mut tries = 0;
     while Instant::now() - start_compute < COMPUTE_TIME {
@@ -96,13 +96,18 @@ fn main() -> Result<()> {
     let mut edges: HashSet<Edge> = Default::default();
     let start_point: Node = get_nearest_k(&nodes, start, 2)[0];
     let end_point: Node = get_nearest_k(&nodes, end, 2)[1];
+    let mut midpoints: Vec<V2> = Vec::new();
+    let mut max_depth_index = (0, 0);
     dfs(
         &mut rng,
-        start.point - V2 { x: 10.0, y: 0.0 },
-        start,
+        start_point.point - V2 { x: 10.0, y: 0.0 },
+        start_point,
         &mut edges,
         &mut visited,
         &nodes,
+        &mut midpoints,
+        &mut max_depth_index,
+        1,
     );
     eprintln!("created {} edges", edges.len());
     document = document.add(
@@ -110,21 +115,22 @@ fn main() -> Result<()> {
             .set("r", MAZE_RADIUS)
             .set("cx", 0.0)
             .set("cy", 0.0)
-            .set("fill", "grey"),
+            .set("fill", rand_col().as_ref()),
     );
 
     let drawn_nodes: HashSet<Index> = HashSet::new();
 
+    let path_color = "#111111";
     for Edge(a, b) in edges {
-        let color = "white"; // HexColor::random_rgb().to_string();
-        document = add_edge(document, nodes[a].point, nodes[b].point, color);
+        // let rand_color = rand_col();
+        document = add_edge(document, nodes[a].point, nodes[b].point, path_color);
         if !drawn_nodes.contains(&a) {
             document = document.add(
                 Circle::new()
                     .set("r", TUBE_RADIUS)
                     .set("cx", nodes[a].point.x)
                     .set("cy", nodes[a].point.y)
-                    .set("fill", "white"),
+                    .set("fill", path_color),
             );
         }
         if !drawn_nodes.contains(&b) {
@@ -133,12 +139,28 @@ fn main() -> Result<()> {
                     .set("r", TUBE_RADIUS)
                     .set("cx", nodes[b].point.x)
                     .set("cy", nodes[b].point.y)
-                    .set("fill", "white"),
+                    .set("fill", path_color),
             );
         }
     }
-    document = add_edge(document, start.point, start_point.point, "white");
-    document = add_edge(document, end.point, end_point.point, "white");
+    // Draw the start.
+    document = document.add(
+        Circle::new()
+            .set("r", TUBE_RADIUS * 1.25)
+            .set("cx", start_point.point.x)
+            .set("cy", start_point.point.y)
+            .set("fill", "green"),
+    );
+    // Draw the end.
+    document = document.add(
+        Circle::new()
+            .set("r", TUBE_RADIUS * 1.25)
+            .set("cx", nodes[max_depth_index.1].point.x)
+            .set("cy", nodes[max_depth_index.1].point.y)
+            .set("fill", "red"),
+    );
+
+    /*
     for Node {
         point: V2 { x, y }, ..
     } in nodes.iter()
@@ -151,10 +173,14 @@ fn main() -> Result<()> {
                 .set("fill", HexColor::random_rgba().to_string().as_str()), // "white"),
         );
     }
+    */
+
     svg::save("image.svg", &document)?;
     Ok(())
 }
-
+fn rand_col() -> String {
+    HexColor::random_rgb().to_string()
+}
 fn get_nearest_k(nodes: &[Node], cur: Node, k: usize) -> Vec<Node> {
     let mut nodes: Vec<Node> = nodes.to_vec();
     nodes.sort_by(|a, b| {
@@ -166,6 +192,7 @@ fn get_nearest_k(nodes: &[Node], cur: Node, k: usize) -> Vec<Node> {
     nodes
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dfs(
     rng: &mut impl Rng,
     prior: V2,
@@ -173,21 +200,48 @@ fn dfs(
     edges: &mut HashSet<Edge>,
     visited: &mut HashSet<Index>,
     nodes: &Vec<Node>,
+    midpoints: &mut Vec<V2>,
+    max_depth_index: &mut (usize, usize),
+    depth: usize,
 ) {
     let cur_vec_angle = (current.point - prior).normalise().angle();
-    let mut nearest_nodes = get_nearest_k(nodes, current, 8);
+    let nearest_nodes = get_nearest_k(nodes, current, 12);
     // nearest_nodes.shuffle(rng);
     for node in nearest_nodes {
         if !visited.contains(&node.index) {
-            visited.insert(node.index);
             let edge = Edge(current.index, node.index);
             let edge_vec = (node.point - current.point).normalise();
             let diff = radian_diff(edge_vec.angle(), cur_vec_angle);
-            // if diff < PI * 0.4 { continue; }
-            // if edge_intersects(edge, edges, nodes) { continue; }
-
-            edges.insert(edge);
-            dfs(rng, current.point, node, edges, visited, nodes);
+            if diff > PI * 0.6 {
+                continue;
+            }
+            //if edge_intersects(edge, edges, nodes) { continue; }
+            let midpoint = (node.point + current.point) * 0.5;
+            if midpoints
+                .iter()
+                .all(|&m| (m - midpoint).length() > MIN_SPACING * 0.8)
+                && nodes
+                    .iter()
+                    .all(|n| (n.point - midpoint).length() > TUBE_RADIUS * 2.1)
+            {
+                if depth > max_depth_index.0 {
+                    *max_depth_index = (depth, node.index);
+                }
+                midpoints.push(midpoint);
+                visited.insert(node.index);
+                edges.insert(edge);
+                dfs(
+                    rng,
+                    current.point,
+                    node,
+                    edges,
+                    visited,
+                    nodes,
+                    midpoints,
+                    max_depth_index,
+                    depth + 1,
+                );
+            }
         }
     }
 }
