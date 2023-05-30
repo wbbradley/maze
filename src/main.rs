@@ -17,6 +17,7 @@ type V2 = Vector2D<f64>;
 type Result<T> = std::result::Result<T, Error>;
 const MAZE_RADIUS: f64 = 500.0;
 const TUBE_RADIUS: f64 = 0.005 * MAZE_RADIUS;
+const DRAW_FACTOR: f64 = 0.9;
 const MIN_SPACING: f64 = TUBE_RADIUS * 3.5;
 const TUBE_SHRINK: f64 = 0.15;
 const COMPUTE_TIME: Duration = Duration::from_secs(2);
@@ -142,10 +143,10 @@ fn main() -> Result<()> {
         .set(
             "viewBox",
             (
-                -MAZE_RADIUS,
-                -MAZE_RADIUS,
-                2.0 * MAZE_RADIUS,
-                2.0 * MAZE_RADIUS,
+                -MAZE_RADIUS * 1.01,
+                -MAZE_RADIUS * 1.01,
+                2.0 * MAZE_RADIUS * 1.01,
+                2.0 * MAZE_RADIUS * 1.01,
             ),
         )
         .set("style", format!("background-color: {path_color}").as_str());
@@ -183,7 +184,7 @@ fn main() -> Result<()> {
         if !drawn_nodes.contains(&a) {
             document = document.add(
                 Circle::new()
-                    .set("r", TUBE_RADIUS)
+                    .set("r", TUBE_RADIUS * DRAW_FACTOR)
                     .set("cx", nodes[a].point.x)
                     .set("cy", nodes[a].point.y)
                     .set("fill", path_color),
@@ -192,7 +193,7 @@ fn main() -> Result<()> {
         if !drawn_nodes.contains(&b) {
             document = document.add(
                 Circle::new()
-                    .set("r", TUBE_RADIUS)
+                    .set("r", TUBE_RADIUS * DRAW_FACTOR)
                     .set("cx", nodes[b].point.x)
                     .set("cy", nodes[b].point.y)
                     .set("fill", path_color),
@@ -266,8 +267,8 @@ fn dfs(
     depth: usize,
 ) {
     let cur_vec_angle = (current.point - prior).normalise().angle();
-    let nearest_nodes = get_nearest_k(nodes, current, 12);
-    // nearest_nodes.shuffle(rng);
+    let mut nearest_nodes = get_nearest_k(nodes, current, 12);
+    nearest_nodes.shuffle(rng);
     for node in nearest_nodes {
         if !visited.contains(&node.index) {
             let edge = Edge(current.index, node.index);
@@ -277,12 +278,18 @@ fn dfs(
                 // println!("bailing AAAAA");
                 continue;
             }
-            //if edge_intersects(edge, edges, nodes) { continue; }
+            if edge_intersects(edge, edges, nodes) {
+                continue;
+            }
             let midpoint = (node.point + current.point) * 0.5;
             if midpoints
                 .iter()
                 .all(|&m| (m - midpoint).length() > MIN_SPACING * 0.8)
-            // && nodes.iter().all(|n| { n.index == node.index || n.index == current.index || (n.point - midpoint).length() > TUBE_RADIUS * 2.1 })
+                && nodes.iter().all(|n| {
+                    n.index == node.index
+                        || n.index == current.index
+                        || (n.point - midpoint).length() > TUBE_RADIUS * 2.0
+                })
             {
                 if depth > max_depth_index.0 {
                     *max_depth_index = (depth, node.index);
@@ -420,7 +427,7 @@ fn add_edge(document: Document, start: V2, end: V2, color: &str) -> Document {
     let path = Path::new()
         .set("fill", color)
         .set("stroke", color)
-        .set("stroke-width", TUBE_RADIUS * 2.0)
+        .set("stroke-width", TUBE_RADIUS * DRAW_FACTOR * 2.0)
         .set("d", data);
     document.add(path)
 }
