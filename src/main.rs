@@ -3,9 +3,9 @@ use hex_color::HexColor;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::collections::HashSet;
-use std::collections::VecDeque;
 use std::f64::consts::{PI, TAU};
 use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 use svg::node::element::path::Data;
 use svg::node::element::{Circle, Path};
 use svg::Document;
@@ -26,6 +26,11 @@ pub struct Error(String);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub struct Edge(pub Index, pub Index);
+impl From<std::time::SystemTimeError> for Error {
+    fn from(e: std::time::SystemTimeError) -> Self {
+        Self(e.to_string())
+    }
+}
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
@@ -68,6 +73,59 @@ fn gen_nodes_random(rng: &mut impl Rng) -> Vec<Node> {
     nodes
 }
 
+fn gen_nodes_spiral() -> Vec<Node> {
+    let mut nodes: Vec<Node> = Vec::new();
+    let mut phi = 0.0;
+    let mut radius = 0.0;
+    let mut index = 0;
+    loop {
+        radius += 0.1;
+        phi += 0.1;
+        let point: V2 = Pol { a: phi, r: radius }.into();
+        if nodes
+            .iter()
+            .cloned()
+            .all(|Node { point: a, .. }| (a - point).length() > MIN_SPACING)
+        {
+            nodes.push(Node { point, index });
+            // eprintln!("point={point:?}, count={}", nodes.len());
+            index += 1;
+        }
+        if point.length() > (MAZE_RADIUS - TUBE_RADIUS * (2f64).sqrt() * 2.0) {
+            break;
+        }
+    }
+    nodes
+}
+
+fn gen_nodes_grid() -> Vec<Node> {
+    let mut nodes: Vec<Node> = Vec::new();
+    let center = V2 { x: 0.0, y: 0.0 };
+    for y in -MAZE_RADIUS as i64..=MAZE_RADIUS as i64 {
+        for x in -MAZE_RADIUS as i64..=MAZE_RADIUS as i64 {
+            let point = V2 {
+                x: x as f64,
+                y: y as f64,
+            };
+            if point.length() > (MAZE_RADIUS - TUBE_RADIUS * (2f64).sqrt() * 2.0) {
+                continue;
+            }
+            if nodes
+                .iter()
+                .cloned()
+                .all(|Node { point: a, .. }| (a - point).length() > MIN_SPACING)
+            {
+                nodes.push(Node {
+                    point,
+                    index: nodes.len(),
+                });
+                // eprintln!("point={point:?}, count={}", nodes.len());
+            }
+        }
+    }
+    nodes
+}
+
 fn main() -> Result<()> {
     let mut rng = rand::thread_rng();
     let start: Node = Node {
@@ -78,7 +136,8 @@ fn main() -> Result<()> {
         }
         .into(),
     };
-    let nodes: Vec<Node> = gen_nodes_random(&mut rng);
+    let nodes: Vec<Node> = gen_nodes_grid();
+    let path_color = "#111111";
     let mut document = Document::new()
         .set(
             "viewBox",
@@ -89,14 +148,14 @@ fn main() -> Result<()> {
                 2.0 * MAZE_RADIUS,
             ),
         )
-        .set("style", "background-color: black");
+        .set("style", format!("background-color: {path_color}").as_str());
 
     let mut visited: HashSet<Index> = Default::default();
     let mut edges: HashSet<Edge> = Default::default();
     let start_point: Node = get_nearest_k(&nodes, start, 2)[0];
     let mut midpoints: Vec<V2> = Vec::new();
     let mut max_depth_index = (0, 0);
-    bfs(
+    dfs(
         &mut rng,
         start_point.point - V2 { x: 10.0, y: 0.0 },
         start_point,
@@ -105,6 +164,7 @@ fn main() -> Result<()> {
         &nodes,
         &mut midpoints,
         &mut max_depth_index,
+        0,
     );
     eprintln!("created {} edges", edges.len());
     document = document.add(
@@ -117,9 +177,8 @@ fn main() -> Result<()> {
 
     let drawn_nodes: HashSet<Index> = HashSet::new();
 
-    let path_color = "#111111";
     for Edge(a, b) in edges {
-        // let rand_color = rand_col();
+        let path_color = "white";
         document = add_edge(document, nodes[a].point, nodes[b].point, path_color);
         if !drawn_nodes.contains(&a) {
             document = document.add(
@@ -171,8 +230,13 @@ fn main() -> Result<()> {
         );
     }
     */
+    let svg_filename = format!(
+        "image-{}.svg",
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs()
+    );
 
-    svg::save("image.svg", &document)?;
+    svg::save(svg_filename.clone(), &document)?;
+    println!("{}", svg_filename);
     Ok(())
 }
 fn rand_col() -> String {
@@ -210,6 +274,7 @@ fn dfs(
             let edge_vec = (node.point - current.point).normalise();
             let diff = radian_diff(edge_vec.angle(), cur_vec_angle);
             if diff > PI * 0.6 {
+                // println!("bailing AAAAA");
                 continue;
             }
             //if edge_intersects(edge, edges, nodes) { continue; }
@@ -217,9 +282,7 @@ fn dfs(
             if midpoints
                 .iter()
                 .all(|&m| (m - midpoint).length() > MIN_SPACING * 0.8)
-                && nodes
-                    .iter()
-                    .all(|n| (n.point - midpoint).length() > TUBE_RADIUS * 2.1)
+            // && nodes.iter().all(|n| { n.index == node.index || n.index == current.index || (n.point - midpoint).length() > TUBE_RADIUS * 2.1 })
             {
                 if depth > max_depth_index.0 {
                     *max_depth_index = (depth, node.index);
@@ -238,6 +301,8 @@ fn dfs(
                     max_depth_index,
                     depth + 1,
                 );
+            } else {
+                // println!( "bailing BBBBB midpoint={midpoint:?}, node={:?}, current={:?}", node.point, current.point);
             }
         }
     }
@@ -269,7 +334,7 @@ fn enqueue_nearest(
             depth,
         });
     }
-    queue.shuffle(rng);
+    // queue.shuffle(rng);
 }
 #[allow(clippy::too_many_arguments)]
 fn bfs(
@@ -297,7 +362,7 @@ fn bfs(
             let edge = Edge(current.index, node.index);
             let edge_vec = (node.point - current.point).normalise();
             let diff = radian_diff(edge_vec.angle(), cur_vec_angle);
-            if diff > PI * 0.6 {
+            if diff > PI * 0.8 {
                 continue;
             }
             if edge_intersects(edge, edges, nodes) {
@@ -359,6 +424,7 @@ fn add_edge(document: Document, start: V2, end: V2, color: &str) -> Document {
         .set("d", data);
     document.add(path)
 }
+
 #[derive(Debug, Clone, Copy)]
 struct Pol {
     pub a: f64,
